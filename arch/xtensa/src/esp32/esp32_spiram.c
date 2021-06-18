@@ -33,7 +33,7 @@
 #include <string.h>
 #include <sys/param.h>
 #include <nuttx/config.h>
-#include <nuttx/irq.h>
+#include <nuttx/spinlock.h>
 
 #include "esp32_spiram.h"
 #include "esp32_spicache.h"
@@ -67,9 +67,9 @@
 
 /* Let's to assume SPIFLASH SPEED == SPIRAM SPEED for now */
 
-#if CONFIG_ESP32_SPIRAM_SPEED_40M
+#if defined(CONFIG_ESP32_SPIRAM_SPEED_40M)
 #  define PSRAM_SPEED PSRAM_CACHE_F40M_S40M
-#elif CONFIG_ESP32_SPIRAM_SPEED_80M
+#elif defined(CONFIG_ESP32_SPIRAM_SPEED_80M)
 #  define PSRAM_SPEED PSRAM_CACHE_F80M_S80M
 #else
 #  error "FLASH speed can only be equal to or higher than SRAM speed while SRAM is enabled!"

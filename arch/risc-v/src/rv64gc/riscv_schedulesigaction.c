@@ -27,10 +27,11 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <sched.h>
+#include <assert.h>
 #include <debug.h>
 
-#include <nuttx/irq.h>
 #include <nuttx/arch.h>
+#include <nuttx/spinlock.h>
 
 #include "sched/sched.h"
 #include "riscv_internal.h"

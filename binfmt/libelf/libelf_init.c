@@ -134,6 +134,7 @@ int elf_init(FAR const char *filename, FAR struct elf_loadinfo_s *loadinfo)
   /* Clear the load info structure */
 
   memset(loadinfo, 0, sizeof(struct elf_loadinfo_s));
+  loadinfo->filfd = -1;
 
   /* Get the length of the file. */
 
@@ -161,7 +162,6 @@ int elf_init(FAR const char *filename, FAR struct elf_loadinfo_s *loadinfo)
   if (ret < 0)
     {
       berr("Failed to read ELF header: %d\n", ret);
-      nx_close(loadinfo->filfd);
       return ret;
     }
 
@@ -181,7 +181,6 @@ int elf_init(FAR const char *filename, FAR struct elf_loadinfo_s *loadinfo)
        */
 
       berr("Bad ELF header: %d\n", ret);
-      nx_close(loadinfo->filfd);
       return ret;
     }
 

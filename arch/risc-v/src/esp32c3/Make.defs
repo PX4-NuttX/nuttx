@@ -46,10 +46,16 @@ endif
 # Specify our C code within this directory to be included
 
 CHIP_CSRCS  = esp32c3_allocateheap.c esp32c3_start.c esp32c3_idle.c
-CHIP_CSRCS += esp32c3_irq.c esp32c3_timerisr.c
+CHIP_CSRCS += esp32c3_irq.c
 CHIP_CSRCS += esp32c3_clockconfig.c esp32c3_gpio.c
 CHIP_CSRCS += esp32c3_lowputc.c
 CHIP_CSRCS += esp32c3_systemreset.c esp32c3_resetcause.c
+
+ifeq ($(CONFIG_SCHED_TICKLESS),y)
+CHIP_CSRCS += esp32c3_tickless.c
+else
+CHIP_CSRCS += esp32c3_timerisr.c
+endif
 
 ifeq ($(CONFIG_ESP32C3_UART),y)
 CHIP_CSRCS += esp32c3_serial.c
@@ -65,6 +71,9 @@ endif
 
 ifeq ($(CONFIG_ESP32C3_SPI),y)
 CHIP_CSRCS += esp32c3_spi.c
+  ifeq ($(CONFIG_SPI_SLAVE),y)
+    CHIP_CSRCS += esp32c3_spi_slave.c
+  endif
 endif
 
 ifeq ($(CONFIG_ESP32C3_SPIFLASH),y)
@@ -100,12 +109,63 @@ ifeq ($(CONFIG_ESP32C3_RT_TIMER),y)
 CHIP_CSRCS += esp32c3_rt_timer.c
 endif
 
+ifeq ($(CONFIG_ESP32C3_BIGNUM_ACCELERATOR),y)
+CHIP_CSRCS += esp32c3_bignum.c
+endif
+
+ifeq ($(CONFIG_ESP32C3_RSA_ACCELERATOR),y)
+CHIP_CSRCS += esp32c3_rsa.c
+endif
+
 ifeq ($(CONFIG_ESP32C3_FREERUN),y)
 CHIP_CSRCS += esp32c3_freerun.c
 endif
 
 ifeq ($(CONFIG_ESP32C3_DISABLE_STDC_ATOMIC),)
 CHIP_CSRCS += esp32c3_std_atomic.c
+endif
+
+ifeq ($(CONFIG_ESP32C3_DMA),y)
+CHIP_CSRCS += esp32c3_dma.c
+endif
+
+ifeq ($(CONFIG_PM),y)
+ifneq ($(CONFIG_ARCH_CUSTOM_PMINIT),y)
+CHIP_CSRCS += esp32c3_pminitialize.c
+endif
+CHIP_CSRCS += esp32c3_pm.c
+endif
+
+CHIP_CSRCS += esp32c3_rtc.c
+
+ifeq ($(CONFIG_ESP32C3_LEDC),y)
+CHIP_CSRCS += esp32c3_ledc.c
+endif
+
+ifeq ($(CONFIG_ESP32C3_ADC),y)
+CHIP_CSRCS += esp32c3_adc.c
+endif
+
+ifeq ($(CONFIG_ESP32C3_AES_ACCELERATOR),y)
+CHIP_CSRCS += esp32c3_aes.c
+endif
+
+ifeq ($(CONFIG_ESP32C3_EFUSE),y)
+CHIP_CSRCS += esp32c3_efuse.c
+CHIP_CSRCS += esp32c3_efuse_table.c
+CHIP_CSRCS += esp32c3_efuse_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_ARCH_USE_TEXT_HEAP),y)
+CHIP_CSRCS += esp32c3_textheap.c
+endif
+
+ifeq ($(CONFIG_RTC_DRIVER),y)
+CHIP_CSRCS += esp32c3_rtc_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_ESP32C3_RTC_HEAP),y)
+CHIP_CSRCS += esp32c3_rtc_heap.c
 endif
 
 ifeq ($(CONFIG_ESP32C3_WIRELESS),y)

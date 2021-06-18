@@ -204,11 +204,6 @@ ifeq ($(CONFIG_SIM_HCISOCKET),y)
   CSRCS += up_hcisocket.c
 endif
 
-ifeq ($(CONFIG_SIM_BTUART),y)
-  HOSTSRCS += up_hcisocket_host.c
-  CSRCS += up_btuart.c
-endif
-
 ifeq ($(CONFIG_I2C_RESET),y)
   HOSTCFLAGS += -DCONFIG_I2C_RESET=1
 endif
@@ -251,8 +246,8 @@ OBJS = $(AOBJS) $(COBJS) $(HOSTOBJS)
 
 ifneq ($(CONFIG_HOST_MACOS),y)
   ARCHSCRIPT += -T nuttx.ld
-  LDSTARTGROUP ?= --start-group
-  LDENDGROUP ?= --end-group
+  LDSTARTGROUP ?= -Wl,--start-group
+  LDENDGROUP ?= -Wl,--end-group
 endif
 
 # Determine which NuttX libraries will need to be linked in

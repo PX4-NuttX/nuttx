@@ -45,6 +45,7 @@
 #include <nuttx/config.h>
 #if defined(CONFIG_NET) && defined(CONFIG_NET_TCP)
 
+#include <assert.h>
 #include <stdint.h>
 #include <string.h>
 #include <debug.h>
@@ -55,6 +56,7 @@
 #include <nuttx/net/ip.h>
 #include <nuttx/net/tcp.h>
 
+#include "netdev/netdev.h"
 #include "devif/devif.h"
 #include "inet/inet.h"
 #include "tcp/tcp.h"
@@ -360,6 +362,7 @@ static void tcp_sendcommon(FAR struct net_driver_s *dev,
     {
       /* Update the TCP received window based on I/O buffer availability */
 
+      uint32_t rcvseq = tcp_getsequence(conn->rcvseq);
       uint16_t recvwndo = tcp_get_recvwindow(dev, conn);
 
       /* Set the TCP Window */
@@ -369,7 +372,7 @@ static void tcp_sendcommon(FAR struct net_driver_s *dev,
 
       /* Update the Receiver Window */
 
-      conn->rcv_wnd = recvwndo;
+      conn->rcv_adv = rcvseq + recvwndo;
     }
 
   /* Finish the IP portion of the message and calculate checksums */
@@ -551,6 +554,45 @@ void tcp_reset(FAR struct net_driver_s *dev)
 }
 
 /****************************************************************************
+ * Name: tcp_rx_mss
+ *
+ * Description:
+ *   Return the MSS to advertize to the peer.
+ *
+ * Input Parameters:
+ *   dev  - The device driver structure
+ *
+ * Returned Value:
+ *   The MSS value.
+ *
+ ****************************************************************************/
+
+uint16_t tcp_rx_mss(FAR struct net_driver_s *dev)
+{
+  uint16_t tcp_mss;
+
+#ifdef CONFIG_NET_IPv6
+#ifdef CONFIG_NET_IPv4
+  if (IFF_IS_IPv6(dev->d_flags))
+#endif
+    {
+      tcp_mss = TCP_IPv6_MSS(dev);
+    }
+#endif /* CONFIG_NET_IPv6 */
+
+#ifdef CONFIG_NET_IPv4
+#ifdef CONFIG_NET_IPv6
+  else
+#endif
+    {
+      tcp_mss = TCP_IPv4_MSS(dev);
+    }
+#endif /* CONFIG_NET_IPv4 */
+
+  return tcp_mss;
+}
+
+/****************************************************************************
  * Name: tcp_synack
  *
  * Description:
@@ -586,10 +628,9 @@ void tcp_synack(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
   if (IFF_IS_IPv6(dev->d_flags))
 #endif
     {
-      /* Get the MSS value and offset TCP header address for this packet */
+      /* Get the offset TCP header address for this packet */
 
       tcp     = TCPIPv6BUF;
-      tcp_mss = TCP_IPv6_MSS(dev);
 
       /* Set the packet length for the TCP Maximum Segment Size */
 
@@ -602,16 +643,17 @@ void tcp_synack(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
   else
 #endif
     {
-      /* Get the MSS value and offset TCP header address for this packet */
+      /* Get the offset TCP header address for this packet */
 
       tcp     = TCPIPv4BUF;
-      tcp_mss = TCP_IPv4_MSS(dev);
 
       /* Set the packet length for the TCP Maximum Segment Size */
 
       dev->d_len  = IPv4TCP_HDRLEN + TCP_OPT_MSS_LEN;
     }
 #endif /* CONFIG_NET_IPv4 */
+
+  tcp_mss = tcp_rx_mss(dev);
 
   /* Save the ACK bits */
 
@@ -628,6 +670,53 @@ void tcp_synack(FAR struct net_driver_s *dev, FAR struct tcp_conn_s *conn,
   /* Complete the common portions of the TCP message */
 
   tcp_sendcommon(dev, conn, tcp);
+}
+
+/****************************************************************************
+ * Name: tcp_send_txnotify
+ *
+ * Description:
+ *   Notify the appropriate device driver that we are have data ready to
+ *   be send (TCP)
+ *
+ * Input Parameters:
+ *   psock - Socket state structure
+ *   conn  - The TCP connection structure
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void tcp_send_txnotify(FAR struct socket *psock,
+                       FAR struct tcp_conn_s *conn)
+{
+#ifdef CONFIG_NET_IPv4
+#ifdef CONFIG_NET_IPv6
+  /* If both IPv4 and IPv6 support are enabled, then we will need to select
+   * the device driver using the appropriate IP domain.
+   */
+
+  if (psock->s_domain == PF_INET)
+#endif
+    {
+      /* Notify the device driver that send data is available */
+
+      netdev_ipv4_txnotify(conn->u.ipv4.laddr, conn->u.ipv4.raddr);
+    }
+#endif /* CONFIG_NET_IPv4 */
+
+#ifdef CONFIG_NET_IPv6
+#ifdef CONFIG_NET_IPv4
+  else /* if (psock->s_domain == PF_INET6) */
+#endif /* CONFIG_NET_IPv4 */
+    {
+      /* Notify the device driver that send data is available */
+
+      DEBUGASSERT(psock->s_domain == PF_INET6);
+      netdev_ipv6_txnotify(conn->u.ipv6.laddr, conn->u.ipv6.raddr);
+    }
+#endif /* CONFIG_NET_IPv6 */
 }
 
 #endif /* CONFIG_NET && CONFIG_NET_TCP */

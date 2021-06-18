@@ -23,9 +23,11 @@
  ****************************************************************************/
 
 #include <stdlib.h>
+#include <assert.h>
 #include <debug.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/himem/himem.h>
+#include <nuttx/spinlock.h>
 
 #include "esp32_spiram.h"
 #include "esp32_himem.h"

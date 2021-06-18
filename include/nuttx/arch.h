@@ -78,13 +78,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <sched.h>
 
 #include <arch/arch.h>
 #include <arch/types.h>
 
 #include <nuttx/compiler.h>
 #include <nuttx/cache.h>
+#include <nuttx/sched.h>
 
 /****************************************************************************
  * Pre-processor definitions
@@ -558,6 +558,8 @@ void up_task_start(main_t taskentry, int argc, FAR char *argv[])
        noreturn_function;
 #endif
 
+#if !defined(CONFIG_BUILD_FLAT) && defined(__KERNEL__) && \
+    !defined(CONFIG_DISABLE_PTHREAD)
 /****************************************************************************
  * Name: up_pthread_start
  *
@@ -569,9 +571,10 @@ void up_task_start(main_t taskentry, int argc, FAR char *argv[])
  *   pthread by calling this function.
  *
  *   Normally the a user-mode start-up stub will also execute before the
- *   pthread actually starts.  See libc/pthread/pthread_startup.c
+ *   pthread actually starts.  See libc/pthread/pthread_create.c
  *
  * Input Parameters:
+ *   startup - The user-space pthread startup function
  *   entrypt - The user-space address of the pthread entry point
  *   arg     - Standard argument for the pthread entry point
  *
@@ -582,10 +585,28 @@ void up_task_start(main_t taskentry, int argc, FAR char *argv[])
  *
  ****************************************************************************/
 
-#if !defined(CONFIG_BUILD_FLAT) && defined(__KERNEL__) && \
-    !defined(CONFIG_DISABLE_PTHREAD)
-void up_pthread_start(pthread_startroutine_t entrypt, pthread_addr_t arg)
+void up_pthread_start(pthread_trampoline_t startup,
+                      pthread_startroutine_t entrypt, pthread_addr_t arg);
        noreturn_function;
+
+/****************************************************************************
+ * Name: up_pthread_exit
+ *
+ * Description:
+ *   In this kernel mode build, this function will be called to execute a
+ *   pthread in user-space. This kernel-mode stub will then be called
+ *   transfer control to the user-mode pthread_exit.
+ *
+ * Input Parameters:
+ *   exit       - The user-space pthread_exit function
+ *   exit_value - The pointer of the pthread exit parameter
+ *
+ * Returned Value:
+ *   None
+ ****************************************************************************/
+
+void up_pthread_exit(pthread_exitroutine_t exit, FAR void *exit_value);
+        noreturn_function;
 #endif
 
 /****************************************************************************
@@ -733,39 +754,39 @@ uintptr_t pgalloc(uintptr_t brkaddr, unsigned int npages);
 #endif
 
 /****************************************************************************
- * Name: up_module_text_init
+ * Name: up_textheap_init
  *
  * Description:
- *   Initialize the module text allocator
+ *   Initialize the text heap.
  *
  ****************************************************************************/
 
-#if defined(CONFIG_ARCH_USE_MODULE_TEXT)
-void up_module_text_init(void);
+#if defined(CONFIG_ARCH_USE_TEXT_HEAP)
+void up_textheap_init(void);
 #endif
 
 /****************************************************************************
- * Name: up_module_text_memalign
+ * Name: up_textheap_memalign
  *
  * Description:
- *   Allocate memory for module text with the specified alignment.
+ *   Allocate memory from the text heap with the specified alignment.
  *
  ****************************************************************************/
 
-#if defined(CONFIG_ARCH_USE_MODULE_TEXT)
-FAR void *up_module_text_memalign(size_t align, size_t size);
+#if defined(CONFIG_ARCH_USE_TEXT_HEAP)
+FAR void *up_textheap_memalign(size_t align, size_t size);
 #endif
 
 /****************************************************************************
- * Name: up_module_text_free
+ * Name: up_textheap_free
  *
  * Description:
- *   Free memory for module text.
+ *   Free memory from the text heap.
  *
  ****************************************************************************/
 
-#if defined(CONFIG_ARCH_USE_MODULE_TEXT)
-void up_module_text_free(FAR void *p);
+#if defined(CONFIG_ARCH_USE_TEXT_HEAP)
+void up_textheap_free(FAR void *p);
 #endif
 
 /****************************************************************************
@@ -1665,6 +1686,23 @@ int up_timer_cancel(FAR struct timespec *ts);
 #if defined(CONFIG_SCHED_TICKLESS) && !defined(CONFIG_SCHED_TICKLESS_ALARM)
 int up_timer_start(FAR const struct timespec *ts);
 #endif
+
+/****************************************************************************
+ * Name: up_getsp
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   Current stack pointer.
+ *
+ ****************************************************************************/
+
+/* uintptr_t up_getsp(void);
+ *
+ * The actual declaration or definition is provided in arch/arch.h.
+ * The actual implementation may be a MACRO or an inline function.
+ */
 
 /****************************************************************************
  * TLS support

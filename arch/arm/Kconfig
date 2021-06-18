@@ -456,6 +456,7 @@ config ARCH_CHIP_CXD56XX
 	select ARCH_HAVE_FPU
 	select ARCH_HAVE_HEAPCHECK
 	select ARCH_HAVE_MULTICPU
+	select ARCH_HAVE_TEXT_HEAP
 	select ARCH_HAVE_SDIO if MMCSD
 	select ARCH_HAVE_MATH_H
 	---help---
@@ -824,6 +825,14 @@ config ARM_HAVE_WFE_SEV
 	default n
 	---help---
 		Use WFE and SEV instructions for spinlock to reduce power consumption
+
+config ARM_HAVE_FPU_D32
+	bool
+	select ARCH_HAVE_FPU
+	default n
+	---help---
+		FPU implemented in the VFPv3-D32 format that supports
+		32 double-precision floating-point registers.
 
 config ARM_HAVE_MPU_UNIFIED
 	bool

@@ -85,9 +85,7 @@ SYSCALL_LOOKUP(sem_wait,                   1)
 
 #ifndef CONFIG_BUILD_KERNEL
   SYSCALL_LOOKUP(task_create,              5)
-#ifdef CONFIG_LIB_SYSCALL
-  SYSCALL_LOOKUP(nx_task_spawn,            1)
-#endif
+  SYSCALL_LOOKUP(task_spawn,               6)
 #else
   SYSCALL_LOOKUP(pgalloc,                  2)
 #endif
@@ -261,6 +259,9 @@ SYSCALL_LOOKUP(telldir,                    1)
 
 #if defined(CONFIG_PIPES) && CONFIG_DEV_PIPE_SIZE > 0
   SYSCALL_LOOKUP(nx_pipe,                  3)
+#endif
+
+#if defined(CONFIG_PIPES) && CONFIG_DEV_FIFO_SIZE > 0
   SYSCALL_LOOKUP(nx_mkfifo,                3)
 #endif
 
@@ -296,6 +297,9 @@ SYSCALL_LOOKUP(telldir,                    1)
 #if CONFIG_TLS_NELEM > 0
   SYSCALL_LOOKUP(tls_alloc,                0)
   SYSCALL_LOOKUP(tls_free,                 1)
+  SYSCALL_LOOKUP(tls_get_set,              1)
+  SYSCALL_LOOKUP(tls_get_dtor,             1)
+  SYSCALL_LOOKUP(tls_set_dtor,             2)
 #endif
 
 /* The following are defined if pthreads are enabled */
@@ -305,9 +309,9 @@ SYSCALL_LOOKUP(telldir,                    1)
   SYSCALL_LOOKUP(pthread_cond_broadcast,   1)
   SYSCALL_LOOKUP(pthread_cond_signal,      1)
   SYSCALL_LOOKUP(pthread_cond_wait,        2)
-  SYSCALL_LOOKUP(pthread_create,           4)
+  SYSCALL_LOOKUP(nx_pthread_create,        6)
   SYSCALL_LOOKUP(pthread_detach,           1)
-  SYSCALL_LOOKUP(pthread_exit,             1)
+  SYSCALL_LOOKUP(nx_pthread_exit,          1)
   SYSCALL_LOOKUP(pthread_getschedparam,    3)
   SYSCALL_LOOKUP(pthread_join,             2)
   SYSCALL_LOOKUP(pthread_mutex_destroy,    1)
@@ -327,10 +331,6 @@ SYSCALL_LOOKUP(telldir,                    1)
   SYSCALL_LOOKUP(pthread_cond_clockwait,   4)
   SYSCALL_LOOKUP(pthread_kill,             2)
   SYSCALL_LOOKUP(pthread_sigmask,          3)
-#ifdef CONFIG_PTHREAD_CLEANUP
-  SYSCALL_LOOKUP(pthread_cleanup_push,     2)
-  SYSCALL_LOOKUP(pthread_cleanup_pop,      1)
-#endif
 #endif
 
 /* The following are defined only if message queues are enabled */

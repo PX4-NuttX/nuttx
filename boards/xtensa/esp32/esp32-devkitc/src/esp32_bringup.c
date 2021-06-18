@@ -74,8 +74,16 @@
 #  include "esp32_bmp180.h"
 #endif
 
+#ifdef CONFIG_LCD_HT16K33
+#  include "esp32_ht16k33.h"
+#endif
+
 #ifdef CONFIG_ESP32_AES_ACCELERATOR
 #  include "esp32_aes.h"
+#endif
+
+#ifdef CONFIG_ESP32_RT_TIMER
+#  include "esp32_rt_timer.h"
 #endif
 
 #ifdef CONFIG_INPUT_BUTTONS
@@ -183,6 +191,14 @@ int esp32_bringup(void)
       syslog(LOG_ERR, "ERROR: Failed to initialize partition error=%d\n",
              ret);
       return ret;
+    }
+#endif
+
+#ifdef CONFIG_ESP32_RT_TIMER
+  ret = esp32_rt_timer_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize RT timer: %d\n", ret);
     }
 #endif
 
@@ -333,6 +349,18 @@ int esp32_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize BMP180 driver: %d\n", ret);
+      return ret;
+    }
+#endif
+
+#ifdef CONFIG_LCD_HT16K33
+  /* Try to register HT16K33 in the I2C0 */
+
+  ret = board_ht16k33_initialize(0, 0);
+
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize HT16K33 driver: %d\n", ret);
       return ret;
     }
 #endif

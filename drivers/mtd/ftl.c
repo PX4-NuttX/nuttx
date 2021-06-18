@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
+#include <assert.h>
 #include <debug.h>
 #include <errno.h>
 
@@ -529,12 +530,16 @@ static int ftl_ioctl(FAR struct inode *inode, int cmd, unsigned long arg)
 
       cmd = MTDIOC_XIPBASE;
     }
-#ifdef CONFIG_FTL_WRITEBUFFER
   else if (cmd == BIOC_FLUSH)
     {
-      return rwb_flush(&dev->rwb);
-    }
+#ifdef CONFIG_FTL_WRITEBUFFER
+      rwb_flush(&dev->rwb);
 #endif
+
+      /* Change the BIOC_FLUSH command to the MTDIOC_FLUSH command. */
+
+      cmd = MTDIOC_FLUSH;
+    }
 
   /* No other block driver ioctl commands are not recognized by this
    * driver.  Other possible MTD driver ioctl commands are passed through

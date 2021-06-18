@@ -37,6 +37,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <debug.h>
+#include <ctype.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
@@ -86,7 +87,7 @@ static int     ramlog_readnotify(FAR struct ramlog_dev_s *priv);
 #endif
 static void    ramlog_pollnotify(FAR struct ramlog_dev_s *priv,
                                  pollevent_t eventset);
-static ssize_t ramlog_addchar(FAR struct ramlog_dev_s *priv, char ch);
+static int     ramlog_addchar(FAR struct ramlog_dev_s *priv, char ch);
 
 /* Character driver methods */
 
@@ -120,7 +121,8 @@ static const struct file_operations g_ramlogfops =
  */
 
 #ifdef CONFIG_RAMLOG_SYSLOG
-static char g_sysbuffer[CONFIG_RAMLOG_BUFSIZE];
+static char g_sysbuffer[CONFIG_RAMLOG_BUFSIZE]
+                               locate_data(CONFIG_RAMLOG_BUFFER_SECTION);
 
 /* This is the device structure for the console or syslogging function.  It
  * must be statically initialized because the RAMLOG ramlog_putc function
@@ -132,8 +134,8 @@ static struct ramlog_dev_s g_sysdev =
 #ifndef CONFIG_RAMLOG_NONBLOCKING
   0,                             /* rl_nwaiters */
 #endif
-  0,                             /* rl_head */
-  0,                             /* rl_tail */
+  CONFIG_RAMLOG_BUFSIZE,         /* rl_head */
+  CONFIG_RAMLOG_BUFSIZE,         /* rl_tail */
   SEM_INITIALIZER(1),            /* rl_exclsem */
 #ifndef CONFIG_RAMLOG_NONBLOCKING
   SEM_INITIALIZER(0),            /* rl_waitsem */
@@ -207,7 +209,7 @@ static void ramlog_pollnotify(FAR struct ramlog_dev_s *priv,
  * Name: ramlog_addchar
  ****************************************************************************/
 
-static ssize_t ramlog_addchar(FAR struct ramlog_dev_s *priv, char ch)
+static int ramlog_addchar(FAR struct ramlog_dev_s *priv, char ch)
 {
   irqstate_t flags;
   size_t nexthead;
@@ -215,6 +217,25 @@ static ssize_t ramlog_addchar(FAR struct ramlog_dev_s *priv, char ch)
   /* Disable interrupts (in case we are NOT called from interrupt handler) */
 
   flags = enter_critical_section();
+
+#ifdef CONFIG_RAMLOG_CRLF
+  /* Ignore carriage returns */
+
+  if (ch == '\r')
+    {
+      leave_critical_section(flags);
+      return OK;
+    }
+
+  /* Pre-pend a carriage before a linefeed */
+
+  if (ch == '\n')
+    {
+      ch = '\r';
+    }
+
+again:
+#endif
 
   /* Calculate the write index AFTER the next byte is written */
 
@@ -231,6 +252,7 @@ static ssize_t ramlog_addchar(FAR struct ramlog_dev_s *priv, char ch)
 #ifdef CONFIG_RAMLOG_OVERWRITE
       /* Yes... Overwrite with the latest log in the circular buffer */
 
+      priv->rl_buffer[priv->rl_tail] = '\0';
       priv->rl_tail += 1;
       if (priv->rl_tail >= priv->rl_bufsize)
         {
@@ -248,6 +270,15 @@ static ssize_t ramlog_addchar(FAR struct ramlog_dev_s *priv, char ch)
 
   priv->rl_buffer[priv->rl_head] = ch;
   priv->rl_head = nexthead;
+
+#ifdef CONFIG_RAMLOG_CRLF
+  if (ch == '\r')
+    {
+      ch = '\n';
+      goto again;
+    }
+#endif
+
   leave_critical_section(flags);
   return OK;
 }
@@ -381,6 +412,7 @@ static ssize_t ramlog_read(FAR struct file *filep, FAR char *buffer,
            */
 
           ch = priv->rl_buffer[priv->rl_tail];
+          priv->rl_buffer[priv->rl_tail] = '\0';
 
           /* Increment the tail index. */
 
@@ -449,30 +481,6 @@ static ssize_t ramlog_write(FAR struct file *filep, FAR const char *buffer,
       /* Get the next character to output */
 
       ch = buffer[nwritten];
-
-      /* Ignore carriage returns */
-
-#ifdef CONFIG_RAMLOG_CRLF
-      if (ch == '\r')
-        {
-          continue;
-        }
-
-      /* Pre-pend a carriage before a linefeed */
-
-      if (ch == '\n')
-        {
-          ret = ramlog_addchar(priv, '\r');
-          if (ret < 0)
-            {
-              /* The buffer is full and nothing was saved.  The remaining
-               * data to be written is dropped on the floor.
-               */
-
-              break;
-            }
-        }
-#endif
 
       /* Then output the character */
 
@@ -640,6 +648,61 @@ errout:
 }
 
 /****************************************************************************
+ * Name: ramlog_initbuf
+ *
+ * Description:
+ *   Initialize g_sysdev based on the current system ramlog buffer.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_RAMLOG_SYSLOG
+static void ramlog_initbuf(void)
+{
+  FAR struct ramlog_dev_s *priv = &g_sysdev;
+  char prev, cur;
+  size_t i;
+
+  if (priv->rl_head != CONFIG_RAMLOG_BUFSIZE ||
+      priv->rl_tail != CONFIG_RAMLOG_BUFSIZE)
+    {
+      return;
+    }
+
+  prev = priv->rl_buffer[priv->rl_bufsize - 1];
+
+  for (i = 0; i < priv->rl_bufsize; i++)
+    {
+      cur = priv->rl_buffer[i];
+
+      if (!isascii(cur))
+        {
+          goto out;
+        }
+
+      if (prev && !cur)
+        {
+          priv->rl_head = i;
+        }
+
+      if (!prev && cur)
+        {
+          priv->rl_tail = i;
+        }
+
+      prev = cur;
+    }
+
+out:
+  if (i != priv->rl_bufsize)
+    {
+      priv->rl_head = 0;
+      priv->rl_tail = 0;
+      memset(priv->rl_buffer, 0, priv->rl_bufsize);
+    }
+}
+#endif
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -728,27 +791,7 @@ int ramlog_putc(FAR struct syslog_channel_s *channel, int ch)
 
   UNUSED(channel);
 
-#ifdef CONFIG_RAMLOG_CRLF
-  /* Ignore carriage returns.  But return success. */
-
-  if (ch == '\r')
-    {
-      return ch;
-    }
-
-  /* Pre-pend a newline with a carriage return */
-
-  if (ch == '\n')
-    {
-      ret = ramlog_addchar(priv, '\r');
-      if (ret < 0)
-        {
-          /* The buffer is full and nothing was saved. */
-
-          return ret;
-        }
-    }
-#endif
+  ramlog_initbuf();
 
   /* Add the character to the RAMLOG */
 
