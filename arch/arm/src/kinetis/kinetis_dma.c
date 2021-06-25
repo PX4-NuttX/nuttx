@@ -105,7 +105,7 @@ static int kinetis_dmainterrupt_int(int irq, void *context,
 
   if (ch->callback)
     {
-      ch->callback((DMA_HANDLE)&ch, ch->arg, 0);
+      ch->callback((DMA_HANDLE)&ch, ch->arg, getreg32(KINETIS_DMA_ES));
     }
 
   return OK;
