@@ -123,6 +123,11 @@
 #    define SPI2_DMABUFSIZE_ALGN SPIDMA_BUF_ALIGN
 #  endif
 #endif
+
+#define  SPI_SR_CLEAR   (SPI_SR_TCF | SPI_SR_EOQF | SPI_SR_TFUF  | \
+                         SPI_SR_TFFF | SPI_SR_RFOF | SPI_SR_RFDF | \
+                         SPI_SR_TXRXS)
+
 /************************************************************************************
  * Private Types
  ************************************************************************************/
@@ -1199,9 +1204,13 @@ static void spi_exchange_nodma(FAR struct spi_dev_s *dev, FAR const void *txbuff
 static void spi_exchange(FAR struct spi_dev_s *dev, FAR const void *txbuffer,
                          FAR void *rxbuffer, size_t nwords)
 {
+  int                          ret;
+  void                         *txbuffer_end;
+  void                         *rxbuffer_end;
+  size_t                       adjust;
+  ssize_t                      nbytes;
   FAR struct kinetis_spidev_s *priv = (FAR struct kinetis_spidev_s *)dev;
-  enum kinetis_dma_data_sz_e sz = KINETIS_DMA_DATA_SZ_8BIT;
-  int ret;
+  enum kinetis_dma_data_sz_e   sz = KINETIS_DMA_DATA_SZ_8BIT;
 
   DEBUGASSERT(priv != NULL);
   DEBUGASSERT(priv && priv->spibase);
@@ -1209,54 +1218,81 @@ static void spi_exchange(FAR struct spi_dev_s *dev, FAR const void *txbuffer,
 
   /* Convert the number of word to a number of bytes */
 
-  size_t nbytes = (priv->nbits > 8) ? nwords << 1 : nwords;
+  adjust = (priv->nbits > 8) ? 2 : 1;
+  nbytes = (priv->nbits > 8) ? nwords << 1 : nwords;
 
+  /* Invalid DMA channels fall back to non-DMA method. */
+
+  if (priv->rxdma == NULL || priv->txdma == NULL
 #ifdef CONFIG_KINETIS_SPI_DMATHRESHOLD
-  /* If this is a small SPI transfer, then let spi_exchange_nodma() do the work. */
+      /* If this is a small SPI transfer, then let spi_exchange_nodma()
+       * do the work.
+       */
 
-  if (nbytes <= CONFIG_KINETIS_SPI_DMATHRESHOLD)
-    {
-      spi_exchange_nodma(dev, txbuffer, rxbuffer, nwords);
-      return;
-    }
+      || nbytes - (2 * adjust) <= CONFIG_KINETIS_SPI_DMATHRESHOLD
 #endif
-
-  if (priv->rxdma == NULL || priv->txdma == NULL)
+      )
     {
-      /* Invalid DMA channels fall back to non-DMA method. */
-
       spi_exchange_nodma(dev, txbuffer, rxbuffer, nwords);
       return;
     }
 
   /* Setup DMAs */
-
+ // FIX ME
   /* If this bus uses a in driver buffers we will incur 2 copies,
    * The copy cost is << less the non DMA transfer time and having
-   * the buffer in the driver ensures DMA can be used. This is bacause
+   * the buffer in the driver ensures DMA can be used. This is because
    * the API does not support passing the buffer extent so the only
    * extent is buffer + the transfer size. These can sizes be less than
-   * the cache line size, and not aligned and tyicaly greater then 4
+   * the cache line size, and not aligned and typically greater then 4
    * bytes, which is about the break even point for the DMA IO overhead.
+   *
+   * The last unit of data (UoD) will be sent manually.
    */
 
   if (txbuffer && priv->txbuf)
     {
-      if (nbytes > priv->buflen)
+      if (nbytes - adjust  > priv->buflen)
         {
           nbytes = priv->buflen;
         }
 
-      memcpy(priv->txbuf, txbuffer, nbytes);
+      txbuffer_end  = &((uint8_t *)txbuffer)[nbytes - adjust];
+
+      rxbuffer_end = NULL;
+      if (rxbuffer != NULL)
+        {
+          rxbuffer_end  = &((uint8_t *)rxbuffer)[nbytes - adjust];
+        }
+
+      /* copy in the  TX data - minus the last */
+
+      memcpy(priv->txbuf, txbuffer, nbytes - adjust);
+  memset(priv->rxbuf, 0xaa, nbytes); //
     }
 
-    sz = priv->nbits > 8 ? KINETIS_DMA_DATA_SZ_16BIT : KINETIS_DMA_DATA_SZ_8BIT;
-    kinetis_dmafree(priv->rxdma);
+  /* Halt the SPI */
 
-    priv->rxdma = kinetis_dmachannel(priv->rxch, priv->spibase +
-                                     KINETIS_SPI_POPR_OFFSET,
-                                     sz,
-                                     KINETIS_DMA_DIRECTION_PERIPHERAL_TO_MEMORY);
+  spi_run(priv, false);
+
+  /* Flush FIFOs */
+
+  spi_modifyreg(priv, KINETIS_SPI_MCR_OFFSET,
+                SPI_MCR_CLR_RXF | SPI_MCR_CLR_TXF,
+                SPI_MCR_CLR_RXF | SPI_MCR_CLR_TXF);
+
+  /* Clear all status bits */
+
+  spi_write_status(priv, SPI_SR_CLEAR);
+
+  /* disable DMA */
+
+  spi_modifyreg(priv, KINETIS_SPI_RSER_OFFSET,
+                SPI_RSER_RFDF_RE | SPI_RSER_TFFF_RE |
+                SPI_RSER_RFDF_DIRS | SPI_RSER_TFFF_DIRS,
+                0);
+
+  sz = priv->nbits > 8 ? KINETIS_DMA_DATA_SZ_16BIT : KINETIS_DMA_DATA_SZ_8BIT;
 
   kinetis_dmafree(priv->txdma);
   priv->txdma = kinetis_dmachannel(priv->txch,
@@ -1264,28 +1300,74 @@ static void spi_exchange(FAR struct spi_dev_s *dev, FAR const void *txbuffer,
                                    sz,
                                    KINETIS_DMA_DIRECTION_MEMORY_TO_PERIPHERAL);
 
+  kinetis_dmafree(priv->rxdma);
+  priv->rxdma = kinetis_dmachannel(priv->rxch,
+                                   priv->spibase + KINETIS_SPI_POPR_OFFSET,
+                                   sz,
+                                   KINETIS_DMA_DIRECTION_PERIPHERAL_TO_MEMORY);
+
   DEBUGASSERT(priv->rxdma && priv->txdma);
 
-  kinetis_dmasetup(priv->rxdma, (uint32_t)priv->rxbuf, nwords, SPIDMA_CONTROL_WORD);
-  kinetis_dmasetup(priv->txdma, (uint32_t)priv->txbuf, nwords, SPIDMA_CONTROL_WORD);
+  /* Set up the DMA */
+
+  kinetis_dmasetup(priv->rxdma, (uint32_t)priv->rxbuf, nbytes - adjust,
+                   SPIDMA_CONTROL_WORD);
+
+  kinetis_dmasetup(priv->txdma, (uint32_t)priv->txbuf, nbytes - adjust,
+                   SPIDMA_CONTROL_WORD);
+
+  spi_modifyreg(priv, KINETIS_SPI_RSER_OFFSET, 0 ,
+                SPI_RSER_RFDF_RE | SPI_RSER_TFFF_RE |
+                SPI_RSER_RFDF_DIRS | SPI_RSER_TFFF_DIRS);
+
 
   /* Start the DMAs */
 
   spi_dmarxstart(priv);
-  spi_dmatxstart(priv);
+  spi_putreg(priv, KINETIS_SPI_TCR_OFFSET, 0);
+  spi_write_control(priv, SPI_PUSHR_CTAS_CTAR0);
+
   spi_run(priv, true);
+
+
+  //
+#if 1
+  for (int i = 0; i < nbytes - adjust; i++)
+    {
+      spi_putreg8(priv, KINETIS_SPI_PUSHR_OFFSET, SPI_PUSHR_TXDATA(priv->txbuf[i]));
+    }
+#endif
+  spi_dmatxstart(priv);
 
   /* Then wait for each to complete */
 
   ret = spi_dmarxwait(priv);
+
   if (ret < 0)
     {
       ret = spi_dmatxwait(priv);
     }
 
+  spi_write_status(priv, spi_getreg(priv, KINETIS_SPI_SR_OFFSET));
+  spi_run(priv, false);
+
+  spi_modifyreg(priv, KINETIS_SPI_RSER_OFFSET,
+                SPI_RSER_RFDF_RE | SPI_RSER_TFFF_RE |
+                SPI_RSER_RFDF_DIRS | SPI_RSER_TFFF_DIRS,
+                0);
+
   if (rxbuffer != NULL && priv->rxbuf != NULL && ret >= 0)
     {
-      memcpy(rxbuffer, priv->rxbuf, nbytes);
+      memcpy(&((uint8_t *)rxbuffer)[adjust], priv->rxbuf, nbytes);
+    }
+
+  spi_exchange_nodma(dev, txbuffer_end, rxbuffer_end, 1);
+
+  //
+  volatile static int j = 0;
+  for (int k = 0; k < 10; k++)
+    {
+      j++;
     }
 }
 
@@ -1457,8 +1539,6 @@ static void spi_dmarxcallback(DMA_HANDLE handle, void *arg, int result)
 {
   FAR struct kinetis_spidev_s *priv = (FAR struct kinetis_spidev_s *)arg;
 
-  /* Wake-up the SPI driver */
-
   priv->rxresult = result | 0x80000000;  /* assure non-zero */
   spi_dmarxwakeup(priv);
 }
@@ -1476,6 +1556,12 @@ static void spi_dmarxcallback(DMA_HANDLE handle, void *arg, int result)
 static void spi_dmatxcallback(DMA_HANDLE handle, void *arg, int result)
 {
   FAR struct kinetis_spidev_s *priv = (FAR struct kinetis_spidev_s *)arg;
+
+  spi_modifyreg(priv, KINETIS_SPI_RSER_OFFSET,
+                SPI_RSER_RFDF_RE | SPI_RSER_TFFF_RE |
+                SPI_RSER_RFDF_DIRS | SPI_RSER_TFFF_DIRS,
+                0);
+
 
   /* Wake-up the SPI driver */
 
@@ -1682,22 +1768,20 @@ FAR struct spi_dev_s *kinetis_spibus_initialize(int port)
       nxsem_set_protocol(&priv->rxsem, SEM_PRIO_NONE);
       nxsem_set_protocol(&priv->txsem, SEM_PRIO_NONE);
 
-      priv->rxdma = kinetis_dmachannel(priv->rxch,
-                                       priv->spibase + KINETIS_SPI_POPR_OFFSET,
-                                       KINETIS_DMA_DATA_SZ_8BIT,
-                                       KINETIS_DMA_DIRECTION_PERIPHERAL_TO_MEMORY);
       priv->txdma = kinetis_dmachannel(priv->txch,
                                        priv->spibase + KINETIS_SPI_PUSHR_OFFSET,
                                        KINETIS_DMA_DATA_SZ_8BIT,
                                        KINETIS_DMA_DIRECTION_MEMORY_TO_PERIPHERAL);
+      priv->rxdma = kinetis_dmachannel(priv->rxch,
+                                       priv->spibase + KINETIS_SPI_POPR_OFFSET,
+                                       KINETIS_DMA_DATA_SZ_8BIT,
+                                       KINETIS_DMA_DIRECTION_PERIPHERAL_TO_MEMORY);
       DEBUGASSERT(priv->rxdma && priv->txdma);
-
-      /* Set up the DMA */
-
-      spi_modifyreg(priv, KINETIS_SPI_RSER_OFFSET, 0 ,
-                    SPI_RSER_RFDF_RE | SPI_RSER_TFFF_RE |
-                    SPI_RSER_RFDF_DIRS | SPI_RSER_TFFF_DIRS);
-    }
+      spi_modifyreg(priv, KINETIS_SPI_MCR_OFFSET,
+                    0,
+                    SPI_MCR_DIS_RXF | SPI_MCR_DIS_TXF
+                    );
+}
   else
     {
       priv->rxdma = NULL;
